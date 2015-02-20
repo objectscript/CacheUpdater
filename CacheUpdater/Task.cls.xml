@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Export generator="Cache" version="25">
-<Class name="GitHubUpdater.Task">
+<Class name="CacheUpdater.Task">
 <Super>%SYS.Task.Definition</Super>
-<TimeCreated>63603,50211.569893</TimeCreated>
+<TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
 <Default>GitHub Update</Default>

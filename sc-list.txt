@@ -1,1 +1,2 @@
+CacheUpdater.Task.CLS
 GitHubUpdater.Task.CLS
