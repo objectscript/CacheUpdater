@@ -18,7 +18,7 @@ To create task for syncing  GitHub repository → Cache instance do the followin
 5. Set <i>GitHubURL</i> to a valid GitHub repository, eg: https://github.com/intersystems-ru/Cache-MDX2JSON
 7. Set <i>Namespace</i> to a Namespace you want to download GitHub repository to
 8. Optionally provide <i>Username</i>, <i>Password</i> (for private repos or very frequent updates).
-9. Set up the <i>Branch</i> you need. Possible values are - commit/branch/tag
+9. Set up the <i>Branch</i> you need. Possible values are names of commit/branch/tag
 8. Set other parameters as desired and finish creation of the task
 
 After task runs at least once you will get <i>GitHubURL</i> repository contents in <i>Namespace</i>
