@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="Cache" version="25">
+<Class name="GitHubUpdater.Task">
+<Super>%SYS.Task.Definition</Super>
+<TimeCreated>63603,50211.569893</TimeCreated>
+
+<Parameter name="TaskName">
+<Default>GitHub Update</Default>
+</Parameter>
+
+<Property name="GitHubURL">
+<Description>
+Repository URL, like https://github.com/intersystems-ru/Cache-MDX2JSON</Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="Username">
+<Description><![CDATA[
+GitHub user, who has access to repository. Optional for public repositories.<br>
+Note, that with Username/Password, you can make up to 5,000 requests per hour. 
+For unauthenticated requests, the rate limit allows to make up to 60 requests per hour. 
+Unauthenticated requests are associated with an IP address.<br>
+Required, if you want to create webhooks]]></Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="Password">
+<Description>
+GitHub password, corresponding to Username. Optional for public repositories.</Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="Namespace">
+<Description>
+Namespace, where to download and compile repository</Description>
+<Type>%String</Type>
+<InitialExpression>$Namespace</InitialExpression>
+</Property>
+
+<Property name="Branch">
+<Description>
+Repository branch, usually master. Leave empty, if you want to receive default branch.</Description>
+<Type>%String</Type>
+<InitialExpression>"master"</InitialExpression>
+</Property>
+
+<Method name="OnTask">
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Return:'##class(%SYS.Namespace).Exists(..Namespace) $$$ERROR($$$NamespaceUnavailable,..Namespace)
+	
+	Set Owner = $p(..GitHubURL,"/",4)
+	Set Repository = $p(..GitHubURL,"/",5)
+		
+	Return ##class(CacheGitHubCI.Hook).Update(Owner, Repository, ..Branch, ..Username, ..Password, ..Namespace)
+]]></Implementation>
+</Method>
+
+<Method name="Update">
+<Description><![CDATA[
+Downloads and compiles GitHub repository.<br>
+<b>Owner</b> - The name of the repository owner.<br>
+<b>Repository</b> - The name of the repository.<br>
+<b>Branch</b> - The name of the commit/branch/tag. If skipped the repository’s default branch (usually master) would be used.<br>
+<b>Username</b> - GitHub user, who has access to repository. Optional for public repositories.<br>
+<b>Password</b> - GitHub password, corresponding to Username. Optional for public repositories.<br>
+Note, that with Username, you can make up to 5,000 requests per hour. 
+For unauthenticated requests, the rate limit allows to make up to 60 requests per hour. 
+Unauthenticated requests are associated with an IP address.<br>
+<b>Namespace</b> - Namespace, where to download and compile repository.<br>
+
+For example in the repository: https://github.com/intersystems-ru/Cache-MDX2JSON<br>
+Owner - intersystems-ru, Repository - Cache-MDX2JSON.<br> ]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>Owner:%String,Repository:%String,Branch:%String="",Username:%String,Password:%String,Namespace=$Namespace</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set req = ..CreateRequest(Username, Password)
+	Set req.Location = "repos/" _ Owner _ "/" _ Repository _ "/contents" 	// as described in https://developer.github.com/v3/repos/	
+	Do:(Branch'="") req.SetParam("ref",Branch) 								// if omitted the repository’s default branch (usually master) would be used
+	
+ 	Set links = ##class(%ListOfDataTypes).%New()
+ 	Set st = ..ProcessDirectory("",req,.links)
+ 	Return:$$$ISERR(st) st
+ 	 	
+ 	Set namespace = $Namespace
+ 	Zn Namespace
+	Set st = ..DownloadFiles(links,req,.list)
+	Set st2 = $system.OBJ.CompileList(.list,"cuk /checkuptodate=expandedonly")
+	Zn namespace
+	
+ 	Return $$$ADDSC(st, st2)
+]]></Implementation>
+</Method>
+
+<Method name="ProcessDirectory">
+<Description><![CDATA[
+Process one directory of GitHub repository. Recursive.<br>
+<b>Path</b> -Internal repository path. Root is empty string<br>
+<b>Request</b> - Authenticated/Set %Net.HttpRequest object.<br>
+<b>Links</b> - List of links to raw files (which satisfy <b>IsCacheFile</b> conditions) from repository.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[Path:%String="",Request:%Net.HttpRequest,&Links:%ListOfDataTypes]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set location = Request.Location
+	Set Request.Location = Request.Location _ Path
+	
+	Set st = Request.Get()
+	Return:$$$ISERR(st) st
+	Return:(Request.HttpResponse.StatusCode = 404) $$$ERROR($$$GeneralError,"Repository doesn't exist OR you don't have access")
+	Return:((Request.HttpResponse.StatusCode = 403) && (Request.HttpResponse.GetHeader("X-RATELIMIT-REMAINING")=0)) $$$ERROR($$$GeneralError,"API rate limit exceeded. Try logging in.")
+ 	Return:(Request.HttpResponse.StatusCode '= 200) $$$ERROR($$$GeneralError,"Received " _ req.HttpResponse.StatusCode _ " expected 200")
+ 	
+ 	#dim objects As List of %ZEN.proxyObject
+ 	#dim obj As %ZEN.proxyObject
+	Set st = ##class(%ZEN.Auxiliary.jsonProvider).%ConvertJSONToObject(Request.HttpResponse.Data,,.objects,1)
+	Return:$$$ISERR(st) st
+	
+	For i = 1:1:objects.Count() {		
+		Set obj = objects.GetAt(i)
+		If (obj.type = "dir") {
+			Set st = ..ProcessDirectory("/"_obj.name,Request,.Links)
+			Return:$$$ISERR(st) st		
+		} ElseIf (obj.type = "file") {
+			Do:..IsCacheFile(obj) Links.Insert(obj."download_url")
+		} Else {
+			// obj.type = "symlink" or obj.type = "submodule"
+		} 
+	}
+	Set Request.Location = location // to keep track of where in the repository tree we are
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="IsCacheFile">
+<Description>
+Check that incoming file is the one you need.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>File:%ZEN.proxyObject</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	Set extensions = ",xml,cls,csp,csr,mac,int,bas,inc,gbl,prj,obj,pkg,gof,"
+	Return:($L(File.name,".")=1) 0 //no extension
+	Set File.Extension = $P(File.name,".",$L(File.name,"."))
+	Return $F(extensions,","_File.Extension_",")
+]]></Implementation>
+</Method>
+
+<Method name="DownloadFiles">
+<Description><![CDATA[
+Download list of files on https://raw.githubusercontent.com/ server.<br>
+<b>Links</b> - List of links to raw files.<br>
+<b>Request</b> - Authenticated/Set %Net.HttpRequest object.<br>
+<b>loadedlist</b> - Returns an array of the items loaded. ]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>Links:%ListOfDataTypes,Request:%Net.HttpRequest,*Items</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Kill Items
+	Set Request.Server = "raw.githubusercontent.com"
+	Set st = $$$OK
+	
+	For i = 1:1:Links.Count() {
+		Set streq = Request.Get($e(Links.GetAt(i),35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
+		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
+ 		Set stload = $system.OBJ.LoadStream(Request.HttpResponse.Data,"",.error,.items)
+ 		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
+ 		Merge Items = items
+	}
+	
+	Set Request.Server="api.github.com"
+	Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateRequest">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>Username:%String,Password:%String</FormalSpec>
+<ReturnType>%Net.HttpRequest</ReturnType>
+<Implementation><![CDATA[
+	Set namespace = $Namespace
+ 	Set SSLConfig = "GitHub"
+ 	
+ 	Zn "%SYS"
+ 	Do:'##class(Security.SSLConfigs).Exists(SSLConfig) ##class(Security.SSLConfigs).Create(SSLConfig)
+ 	Zn namespace
+
+ 	Set req=##class(%Net.HttpRequest).%New()
+ 	Set req.Https=1
+	Set req.SSLConfiguration=SSLConfig
+	Set req.Server="api.github.com"							
+	Do req.SetHeader("Accept","application/vnd.github.v3+json") 			// we want 3rd version of api	
+	
+	If ($d(Username) && $d(Password) && (Username'="") && (Password'="")) {	// supply Username and Password, if both are provided. GitHub accept Basic Auth
+		Set req.Username = Username											// https://developer.github.com/v3/auth/
+	 	Set req.Password = Password
+	} 	
+
+	Return req
+]]></Implementation>
+</Method>
+</Class>
+</Export>

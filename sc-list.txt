@@ -1,0 +1,1 @@
+GitHubUpdater.Task.CLS
