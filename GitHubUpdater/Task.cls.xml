@@ -51,12 +51,8 @@ Repository branch, usually master. Leave empty, if you want to receive default b
 	
 	Set Owner = $p(..GitHubURL,"/",4)
 	Set Repository = $p(..GitHubURL,"/",5)
-		
-<<<<<<< HEAD
+	
 	Return ..Update(Owner, Repository, ..Branch, ..Username, ..Password, ..Namespace)
-=======
-	Return ##class(CacheGitHubCI.Hook).Update(Owner, Repository, ..Branch, ..Username, ..Password, ..Namespace)
->>>>>>> 203303a0b4d22196f711e5a3e544c44adb21c685
 ]]></Implementation>
 </Method>
 
