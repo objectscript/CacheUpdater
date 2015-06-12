@@ -10,8 +10,10 @@
 
 <Property name="GitHubURL">
 <Description>
-Repository URL, like https://github.com/intersystems-ru/Cache-MDX2JSON</Description>
+Repository URL, like https://github.com/intersystems-ru/Cache-MDX2JSON
+Encreased to 250 to support long urls</Description>
 <Type>%String</Type>
+<Parameter name="MAXLEN" value="250"/>
 </Property>
 
 <Property name="Username">
