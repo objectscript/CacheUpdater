@@ -166,7 +166,7 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
  		Set stload = $system.OBJ.LoadStream(Request.HttpResponse.Data,"",.error,.items)
  		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
- 		Merge Items = items
+ 		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
 	}
 	
 	Set Request.Server="api.github.com"
