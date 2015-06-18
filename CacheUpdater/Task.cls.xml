@@ -11,9 +11,9 @@
 <Property name="GitHubURL">
 <Description>
 Repository URL, like https://github.com/intersystems-ru/Cache-MDX2JSON
-Encreased to 250 to support long urls</Description>
+Increased to 500 to support long urls</Description>
 <Type>%String</Type>
-<Parameter name="MAXLEN" value="250"/>
+<Parameter name="MAXLEN" value="500"/>
 </Property>
 
 <Property name="Username">
@@ -166,7 +166,18 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 	For i = 1:1:Links.Count() {
 		Set streq = Request.Get($e(Links.GetAt(i),35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
 		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
- 		Set stload = $system.OBJ.LoadStream(Request.HttpResponse.Data,"",.error,.items)
+		
+		Set binarystream = Request.HttpResponse.Data
+		Do binarystream.Rewind() // just in case
+		
+		Set stream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
+		While 'binarystream.AtEnd { 
+			Do stream.Write(binarystream.Read()) 
+		}
+		Do stream.Rewind()
+		
+		Set stload = $system.OBJ.LoadStream(stream,"",.error,.items,,,,"UTF8")
+		
  		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
  		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
 	}
