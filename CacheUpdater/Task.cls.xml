@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.1 (Build 656U)" ts="2016-07-25 16:07:12">
 <Class name="CacheUpdater.Task">
 <Super>%SYS.Task.Definition</Super>
+<TimeChanged>64121,39819.499352</TimeChanged>
 <TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
@@ -164,7 +165,8 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 	Set st = $$$OK
 	
 	For i = 1:1:Links.Count() {
-		Set streq = Request.Get($e(Links.GetAt(i),35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
+		Set link = Links.GetAt(i)
+		Set streq = Request.Get($e(link,35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
 		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
 		
 		Set binarystream = Request.HttpResponse.Data
@@ -172,11 +174,18 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 		
 		Set stream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
 		While 'binarystream.AtEnd { 
-			Do stream.Write(binarystream.Read()) 
+			Do stream.WriteLine(binarystream.ReadLine()) 
 		}
 		Do stream.Rewind()
 		
-		Set stload = $system.OBJ.LoadStream(stream,"",.error,.items,,,,"UTF8")
+		
+		Set strload = ""
+		If ..IsUDLFormat(link) {
+			Set stload = ..LoadUDLFile(stream, link)
+		} 
+		Else {
+			Set stload = $system.OBJ.LoadStream(stream,"",.error,.items,,,,"UTF8")
+		}
 		
  		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
  		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
@@ -184,6 +193,182 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 	
 	Set Request.Server="api.github.com"
 	Return st
+]]></Implementation>
+</Method>
+
+<Method name="LoadUDLFile">
+<Description><![CDATA[
+Imports the file in UDL file in the project
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>contentStream:%GlobalCharacterStream,url:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = $$$OK
+	Set ext = ..GetExt(url)
+	If ext = "cls" {
+		Set st = ..CreateClass(contentStream, url)
+	}
+	Elseif ext = "dfi" {
+		Set st = ..CreateDFI(contentStream, url)
+	}
+	Else {
+		Set st = ..CreateOther(contentStream, url)
+	}
+	
+	Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateClass">
+<Description><![CDATA[
+Creates and imports the class into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>contentStream:%CharacterStream,url:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = ..GetClassName(url, .className)
+	Do contentStream.Rewind()
+	Return:$$$ISERR(st) st
+	
+	If '..IsClassExist(className) {
+		Set clsDef = ##class(%Dictionary.ClassDefinition).%New()
+		Set clsDef.Name = className
+		Set st = clsDef.%Save()
+		Return:$$$ISERR(st) st
+	}
+
+	
+	Set namespace = $namespace
+	
+	Set st = ##class(%Compiler.UDL.TextServices).SetTextFromStream(namespace, className, contentStream)
+	Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateDFI">
+<Description><![CDATA[
+Creates and imports the dfi file into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>contentStream:%CharacterStream,url:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = $$$OK
+    Try {
+	    Set st = ..GetDFIName(url, .name)
+	    Return:$$$ISERR(st) st
+	    
+        Set tDoc = ##class(%DeepSee.UI.FolderItemDocument).%New(name)
+        Set st = tDoc.ImportFromXML(contentStream)
+        Return:$$$ISERR(st) st
+        
+        Set st = tDoc.Save()
+        Return:$$$ISERR(st) st
+    } Catch e {
+        Set st = e.AsStatus()
+    }
+    Return st
+]]></Implementation>
+</Method>
+
+<Method name="IsClassExist">
+<Description><![CDATA[
+Checks whether the class exists
+<b>className</b> - name of the class.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>className:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	Set query = "SELECT TOP 1 COUNT(ID) FROM %Dictionary.ClassDefinition WHERE ID = ?"
+	Set statement = ##class(%SQL.Statement).%New()
+	Set st = statement.%Prepare(query)
+	Set rset = statement.%Execute(className)
+	If rset.%Next() && (rset.%ROWCOUNT > 0) {
+		Return 1
+	}
+	Return 0
+]]></Implementation>
+</Method>
+
+<Method name="GetClassName">
+<Description><![CDATA[
+Gets the name of the class by url
+<b>url</b> - the url where the file is located in the web.<br>
+<b>name</b> - simply a variable which is injected by a class name<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[url:%String,&name]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set formattedUrl = $Translate($Translate(url, "\", "/"), "/", ".")
+	Set name = $Replace($Extract(formattedUrl, $Find(formattedUrl, "cls."), *), ".cls", "")
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="GetDFIName">
+<Description><![CDATA[
+Gets the name of the dfi file by url
+<b>url</b> - the url where the file is located in the web.<br>
+<b>name</b> - simply a variable which is injected by a dfi file name<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[url:%String,&name]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set formattedUrl = $Translate($Translate(url, "\", "/"), "/", ".")
+	Set name = $Replace($Extract(formattedUrl, $Find(formattedUrl, "dfi."), *), "%20", " ")
+	Return $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="CreateOther">
+<Description><![CDATA[
+Creates and imports other files into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>contentStream:%GlobalCharacterStream,url:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set internalName = $Piece(url, "/", *)
+		
+	Set rtn = ##class(%Routine).%New(internalName)
+	Set status = rtn.CopyFrom(contentStream)
+	Return:$$$ISERR(status) status
+	
+	Set status = rtn.Save()
+ 	Return:$$$ISERR(status) status
+ 	
+ 	Set status = rtn.Compile()
+ 	Return status
+]]></Implementation>
+</Method>
+
+<Method name="GetExt">
+<Description><![CDATA[
+Get extension of the file by url
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>url:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[	Return $ZConvert($Piece(url, ".", *), "l")
+]]></Implementation>
+</Method>
+
+<Method name="IsUDLFormat">
+<Description><![CDATA[
+Checks whether the url contains a file in udl format
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>url:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	Set extensions = "cls,mac,int,inc,dfi"
+	Return $Find(extensions, $Piece(url, ".", *))
 ]]></Implementation>
 </Method>
 
