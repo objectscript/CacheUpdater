@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.1 (Build 656U)" ts="2016-07-25 16:07:12">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.1 (Build 656U)" ts="2016-08-03 15:01:48">
 <Class name="CacheUpdater.Task">
 <Super>%SYS.Task.Definition</Super>
-<TimeChanged>64121,39819.499352</TimeChanged>
+<TimeChanged>64133,53990.540278</TimeChanged>
 <TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
@@ -180,7 +180,7 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 		
 		
 		Set strload = ""
-		If ..IsUDLFormat(link) {
+		If ..IsUDLFormat(stream, link) {
 			Set stload = ..LoadUDLFile(stream, link)
 		} 
 		Else {
@@ -362,13 +362,26 @@ Get extension of the file by url
 <Method name="IsUDLFormat">
 <Description><![CDATA[
 Checks whether the url contains a file in udl format
+<b>contentStream</b> - the stream which contains the source code.<br>
 <b>url</b> - the url where the file is located in the web.<br>]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec>url:%String</FormalSpec>
+<FormalSpec>contentStream:%GlobalCharacterStream,url:%String</FormalSpec>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
 	Set extensions = "cls,mac,int,inc,dfi"
-	Return $Find(extensions, $Piece(url, ".", *))
+	If $Find(extensions, $Piece(url, ".", *)) {
+		Set st = ##class(%XML.TextReader).ParseStream(contentStream)
+		Do contentStream.Rewind()
+		If $$$ISERR(st) {
+			Return $$$YES
+		}
+		Else {
+			Return $$$NO
+		}
+	}
+	Else {
+		Return $$$NO
+	}
 ]]></Implementation>
 </Method>
 
