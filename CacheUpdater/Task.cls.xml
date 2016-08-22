@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.1 (Build 656U)" ts="2016-08-03 15:01:48">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.1 (Build 656U)" ts="2016-08-22 12:29:27">
 <Class name="CacheUpdater.Task">
 <Super>%SYS.Task.Definition</Super>
-<TimeChanged>64133,53990.540278</TimeChanged>
+<TimeChanged>64152,44773.510857</TimeChanged>
 <TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
@@ -206,6 +206,12 @@ Imports the file in UDL file in the project
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	Set st = $$$OK
+	
+	set params = $find(url, "?")
+	if params {
+		set url = $extract(url, 1, params - 2)
+	}
+	
 	Set ext = ..GetExt(url)
 	If ext = "cls" {
 		Set st = ..CreateClass(contentStream, url)
@@ -245,6 +251,10 @@ Creates and imports the class into the project from stream
 	Set namespace = $namespace
 	
 	Set st = ##class(%Compiler.UDL.TextServices).SetTextFromStream(namespace, className, contentStream)
+	
+	if st {
+		w !, "Imported " _ className, !
+	}
 	Return st
 ]]></Implementation>
 </Method>
@@ -268,6 +278,9 @@ Creates and imports the dfi file into the project from stream
         Return:$$$ISERR(st) st
         
         Set st = tDoc.Save()
+        if st {
+		w !, "Imported " _ name, !
+	}
         Return:$$$ISERR(st) st
     } Catch e {
         Set st = e.AsStatus()
@@ -344,6 +357,9 @@ Creates and imports other files into the project from stream
  	Return:$$$ISERR(status) status
  	
  	Set status = rtn.Compile()
+ 	if st {
+		w !, "Imported " _ internalName, !
+	}
  	Return status
 ]]></Implementation>
 </Method>
@@ -355,7 +371,9 @@ Get extension of the file by url
 <ClassMethod>1</ClassMethod>
 <FormalSpec>url:%String</FormalSpec>
 <ReturnType>%String</ReturnType>
-<Implementation><![CDATA[	Return $ZConvert($Piece(url, ".", *), "l")
+<Implementation><![CDATA[
+	
+	Return $ZConvert($Piece(url, ".", *), "l")
 ]]></Implementation>
 </Method>
 
@@ -368,16 +386,14 @@ Checks whether the url contains a file in udl format
 <FormalSpec>contentStream:%GlobalCharacterStream,url:%String</FormalSpec>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
+	set params = $find(url, "?")
+	if params {
+		set url = $extract(url, 1, params - 2)
+	}
+	
 	Set extensions = "cls,mac,int,inc,dfi"
 	If $Find(extensions, $Piece(url, ".", *)) {
-		Set st = ##class(%XML.TextReader).ParseStream(contentStream)
-		Do contentStream.Rewind()
-		If $$$ISERR(st) {
-			Return $$$YES
-		}
-		Else {
-			Return $$$NO
-		}
+		return $$$YES
 	}
 	Else {
 		Return $$$NO
