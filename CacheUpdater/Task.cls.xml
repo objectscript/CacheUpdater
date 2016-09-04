@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.2 (Build 721U)" ts="2016-08-31 14:17:29">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.2 (Build 721U)" ts="2016-09-04 22:50:49">
 <Class name="CacheUpdater.Task">
 <Super>%SYS.Task.Definition</Super>
 <TimeChanged>64161,48985.224853</TimeChanged>
@@ -227,7 +227,7 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 
 <Class name="CacheUpdater.UDL">
 <Super>%RegisteredObject</Super>
-<TimeChanged>64161,51384.891047</TimeChanged>
+<TimeChanged>64165,82238.47126</TimeChanged>
 <TimeCreated>64161,48850.325593</TimeCreated>
 
 <Method name="IsUDLFile">
@@ -594,8 +594,9 @@ Creates and imports mac, int, inc files into the project from stream
 	Do contentStream.Rewind()
 	
 	set CSPPath = $system.CSP.GetFileName($system.CSP.GetDefaultApp($namespace)_"/")
-	set fileDirectory = $Piece(url, "csp/", 2)
+	set fileDirectory = $translate($Piece(url, "csp/", 2), "\", "/")
 	set dirChain = $p(CSPPath_fileDirectory,$p($translate(CSPPath_fileDirectory,"\","/"),"/",*),1)
+	set dirChain = $translate(dirChain, "\", "/")
 	do ##class(%File).CreateDirectoryChain(dirChain)
 	set st = filestream.LinkToFile(CSPPath_fileDirectory)
 	
