@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.2 (Build 721U)" ts="2016-09-04 22:50:49">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.2 (Build 721U)" ts="2016-09-12 18:18:41">
 <Class name="CacheUpdater.Task">
-<Super>%SYS.Task.Definition</Super>
-<TimeChanged>64161,48985.224853</TimeChanged>
+<Super>%SYS.Task.Definition,CacheUpdater.UDL</Super>
+<TimeChanged>64173,65712.36031</TimeChanged>
 <TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
@@ -75,20 +75,21 @@ Unauthenticated requests are associated with an IP address.<br>
 For example in the repository: https://github.com/intersystems-ru/Cache-MDX2JSON<br>
 Owner - intersystems-ru, Repository - Cache-MDX2JSON.<br> ]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec>Owner:%String,Repository:%String,Branch:%String="",Username:%String,Password:%String,Namespace=$Namespace</FormalSpec>
+<FormalSpec>Owner:%String,Repository:%String,Branch:%String="",Username:%String="",Password:%String="",Namespace=$Namespace</FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
+	#dim req As %Net.HttpRequest 
 	Set req = ..CreateRequest(Username, Password)
 	Set req.Location = "repos/" _ Owner _ "/" _ Repository _ "/contents" 	// as described in https://developer.github.com/v3/repos/	
-	Do:(Branch'="") req.SetParam("ref",Branch) 								// if omitted the repository’s default branch (usually master) would be used
 	
  	Set links = ##class(%ListOfDataTypes).%New()
- 	Set st = ..ProcessDirectory("",req,.links)
+ 	Set st = ..ProcessDirectory("",.req,Branch,.links)
  	Return:$$$ISERR(st) st
  	 	
  	Set namespace = $Namespace
  	Zn Namespace
 	Set st = ..DownloadFiles(links,req,.list)
+	zw list
 	Set st2 = $system.OBJ.CompileList(.list,"cuk /checkuptodate=expandedonly")
 	Zn namespace
 	
@@ -103,13 +104,15 @@ Process one directory of GitHub repository. Recursive.<br>
 <b>Request</b> - Authenticated/Set %Net.HttpRequest object.<br>
 <b>Links</b> - List of links to raw files (which satisfy <b>IsCacheFile</b> conditions) from repository.<br>]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec><![CDATA[Path:%String="",Request:%Net.HttpRequest,&Links:%ListOfDataTypes]]></FormalSpec>
+<FormalSpec><![CDATA[Path:%String="",Request:%Net.HttpRequest,Branch:%String="",&Links:%ListOfDataTypes]]></FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	Set location = Request.Location
 	Set Request.Location = Request.Location _ Path
+	Do:(Branch'="") Request.SetParam("ref",Branch) 
 	
 	Set st = Request.Get()
+
 	Return:$$$ISERR(st) st
 	Return:(Request.HttpResponse.StatusCode = 404) $$$ERROR($$$GeneralError,"Repository doesn't exist OR you don't have access")
 	Return:((Request.HttpResponse.StatusCode = 403) && (Request.HttpResponse.GetHeader("X-RATELIMIT-REMAINING")=0)) $$$ERROR($$$GeneralError,"API rate limit exceeded. Try logging in.")
@@ -123,10 +126,11 @@ Process one directory of GitHub repository. Recursive.<br>
 	For i = 1:1:objects.Count() {		
 		Set obj = objects.GetAt(i)
 		If (obj.type = "dir") {
-			Set st = ..ProcessDirectory("/"_obj.name,Request,.Links)
+			Set st = ..ProcessDirectory("/"_obj.name,Request,Branch,.Links)
 			Return:$$$ISERR(st) st		
 		} ElseIf (obj.type = "file") {
-			Do:..IsCacheFile(obj) Links.Insert(obj."download_url")
+			//Do:..IsCacheFile(obj) Links.Insert(obj."download_url")
+			Do Links.Insert($LB(obj."download_url",..IsCacheFile(obj)))
 		} Else {
 			// obj.type = "symlink" or obj.type = "submodule"
 		} 
@@ -143,7 +147,7 @@ Check that incoming file is the one you need.</Description>
 <FormalSpec>File:%ZEN.proxyObject</FormalSpec>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
-	Set extensions = ",xml,cls,csp,csr,mac,int,bas,inc,gbl,prj,obj,pkg,gof,dfi,pivot,dashboard,html,css,js,ts,scss"
+	Set extensions = ",xml,cls,csp,csr,mac,int,bas,inc,gbl,prj,obj,pkg,gof,dfi,pivot,dashboard,html,css,js,ts,scss,"
 	Return:($L(File.name,".")=1) 0 //no extension
 	Set File.Extension = $P(File.name,".",$L(File.name,"."))
 	Return $F(extensions,","_$ZCVT(File.Extension,"l")_",")
@@ -163,36 +167,100 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 	Kill Items
 	Set Request.Server = "raw.githubusercontent.com"
 	Set st = $$$OK
-	
-	For i = 1:1:Links.Count() {
-		Set link = Links.GetAt(i)
-		Set streq = Request.Get($e(link,35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
-		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
-		
-		Set binarystream = Request.HttpResponse.Data
-		Do binarystream.Rewind() // just in case
-		
-		Set stream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
-		While 'binarystream.AtEnd { 
-			Do stream.WriteLine(binarystream.ReadLine()) 
+	Try
+	{
+		For i = 1:1:Links.Count() 
+		{
+			Set link = $ListGet(Links.GetAt(i),1)
+			Set bIsCacheFile = $ListGet(Links.GetAt(i),2)
+			Set ^gitfiles(i,"link")=link
+			Set ^gitfiles(i,"bIsCacheFile")=bIsCacheFile
+			
+			Set streq = Request.Get($e(link,35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
+			If $$$ISERR(streq)
+			{
+				Set st=$$$ADDSC(st, streq)
+				Set ^gitfiles(i,"streq")=streq
+				Continue
+			}
+			
+			Set ^gitfiles(i,"stream")="starting..."
+			Set binarystream = Request.HttpResponse.Data
+			
+			Do binarystream.Rewind() // just in case
+			
+			Set characterStream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
+			Set stTranslate=$$$OK
+			Try
+			{
+				While 'binarystream.AtEnd
+				{
+					//Use eol to prevent breaking lines larger than 32Kb
+					Set line=binarystream.ReadLine(, .stTranslate, .eol)
+					Quit:$System.Status.IsError(stTranslate)
+								
+					If eol
+					{
+						Set stTranslate=characterStream.WriteLine(line)
+					}
+					Else
+					{
+						Set stTranslate=characterStream.Write(line)
+					}
+					Quit:$System.Status.IsError(stTranslate)
+				}	
+				Quit:$System.Status.IsError(stTranslate)
+				
+				Do characterStream.Rewind()
+			}
+			Catch (oTranslateStreamException)
+			{
+				Set stTranslate=oTranslateStreamException.AsStatus()
+			}
+			
+			If $System.Status.IsError(stTranslate)
+			{
+				//Could not convert binary stream to character stream
+				//It is probably a binary file anyway
+				Set characterStream=""
+				Set st=$$$ADDSC(st, stTranslate)
+				Set ^gitfiles(i,"stTranslate")=stTranslate
+			}
+			Set ^gitfiles(i,"stream")="Done"
+			
+			Do binarystream.Rewind()
+			
+			Set stload = $$$OK
+			
+			set items = ""
+			If ('$IsObject(characterStream)) || (..IsUDLFile(characterStream))
+			{
+				Set ^gitfiles(i,"IsUDLFile")="1"
+				Set stload = ..LoadUDLFile(characterStream, binarystream, link, .items)
+			}
+			ElseIf bIsCacheFile
+			{
+				Set ^gitfiles(i,"IsUDLFile")="0"
+				Set stload = $system.OBJ.LoadStream(characterStream,"",.error,.items,,,,"UTF8")
+			}
+			Set ^gitfiles(i,"stload")=stload
+	 		If $$$ISERR(stload)
+	 		{
+		 		Set st=$$$ADDSC(st, stload)
+		 		Continue
+	 		}
+	 		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
 		}
-		Do stream.Rewind()
 		
-		
-		Set strload = ""
-		If ##class(CacheUpdater.UDL).IsUDLFile(stream) {
-			Set stload = ##class(CacheUpdater.UDL).LoadUDLFile(stream, link, .items)
-		} 
-		Else {
-			Set stload = $system.OBJ.LoadStream(stream,"",.error,.items,,,,"UTF8")
-		}
-		
- 		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
- 		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
+		Set Request.Server="api.github.com"
+	}
+	Catch (oException)
+	{
+		Set st = oException.AsStatus()
+		If $D(i) Set ^gitfiles(i,"st final")=st
 	}
 	
-	Set Request.Server="api.github.com"
-	Return st
+	Quit st
 ]]></Implementation>
 </Method>
 
@@ -227,7 +295,7 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 
 <Class name="CacheUpdater.UDL">
 <Super>%RegisteredObject</Super>
-<TimeChanged>64165,82238.47126</TimeChanged>
+<TimeChanged>64173,65465.415142</TimeChanged>
 <TimeCreated>64161,48850.325593</TimeCreated>
 
 <Method name="IsUDLFile">
@@ -265,23 +333,8 @@ Finds the first string in a line
 <FormalSpec>line:%String</FormalSpec>
 <ReturnType>%String</ReturnType>
 <Implementation><![CDATA[
-	set counter = 1
-	set letter = $extract(line, counter)
-	while letter '= "" {
-		if letter = " " {
-			set counter = counter + 1
-			set letter = $extract(line, counter)
-			continue
-		} else {
-			set ext = $extract(line, counter, *)
-			set index = $find(ext, " ")
-			if index = 0 {
-				set index = 9999999999
-			}
-			return $extract(ext, 0, index - 2)		
-		}
-	}
-	return ""
+	set trimmed = $zstrip(line, "<>W")
+	return $piece(trimmed, " ")
 ]]></Implementation>
 </Method>
 
@@ -396,8 +449,9 @@ Get extension of the file by url
 <FormalSpec>url:%String</FormalSpec>
 <ReturnType>%String</ReturnType>
 <Implementation><![CDATA[
-	
-	return $zconvert($piece(url, ".", *), "l")
+	//return $zconvert($piece(url, ".", *), "l")
+	//AMIR: There are parameters after the extension that are not part of the extension
+	return $zconvert($piece($piece(url, ".", *),"?"), "l")
 ]]></Implementation>
 </Method>
 
@@ -409,7 +463,6 @@ Check whether a file is a web file
 <FormalSpec>ext:%String</FormalSpec>
 <ReturnType>%String</ReturnType>
 <Implementation><![CDATA[
-	
 	set webExts = "csp,html,css,js,ts,scss"
 	return $find(webExts, ext)
 ]]></Implementation>
@@ -422,12 +475,13 @@ Imports the file in UDL file in the project
 <b>url</b> - the url where the file is located in the web.<br>
 <b>list</b> - array of files to compile<br>]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec>contentStream:%GlobalCharacterStream,url:%String,list:%String</FormalSpec>
+<FormalSpec>contentStream:%GlobalCharacterStream,binaryStream:%Stream.FileCharacterGzip,url:%String,list:%String</FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	set st = $$$OK
 	
 	set ext = ..GetExt(url)
+	
 	if ext = "cls" {
 		set st = ..CreateClass(contentStream, url, .list)
 	}
@@ -436,10 +490,11 @@ Imports the file in UDL file in the project
 	}
 	elseif (ext = "inc") || (ext = "mac") {
 		set st = ..CreateRoutine(contentStream, url, .list)
-	} elseif ..IsWebFile(ext) {
-		set st = ..CreateWebFile(contentStream, url, ext, .list)
+	} 
+	else
+	{
+		set st = ..CreateWebFile(contentStream, binaryStream, url, ext, .list)
 	}
-	
 	return st
 ]]></Implementation>
 </Method>
@@ -585,34 +640,57 @@ Creates and imports mac, int, inc files into the project from stream
 <b>ext</b> - extension of the file<br>
 <b>list</b> - array of files to compile<br>]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec><![CDATA[contentStream:%GlobalCharacterStream,url:%String,ext:%String,&list:%String]]></FormalSpec>
+<FormalSpec><![CDATA[contentStream:%GlobalCharacterStream,binaryStream:%Stream.FileCharacterGzip,url:%String,ext:%String,&list:%String]]></FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	Set st = $$$OK
-	
-	Set filestream = ##class(%Stream.FileCharacter).%New()
-	Do contentStream.Rewind()
-	
-	set CSPPath = $system.CSP.GetFileName($system.CSP.GetDefaultApp($namespace)_"/")
-	set fileDirectory = $translate($Piece(url, "csp/", 2), "\", "/")
-	set dirChain = $p(CSPPath_fileDirectory,$p($translate(CSPPath_fileDirectory,"\","/"),"/",*),1)
-	set dirChain = $translate(dirChain, "\", "/")
-	do ##class(%File).CreateDirectoryChain(dirChain)
-	set st = filestream.LinkToFile(CSPPath_fileDirectory)
-	
-	While 'contentStream.AtEnd
+	Try
 	{
-		Do filestream.WriteLine(contentStream.ReadLine())
+		Set tDefaultApp=$system.CSP.GetDefaultApp($namespace)_"/"
+		set tCSPRootPath = $system.CSP.GetFileName(tDefaultApp)
+		
+		Set tFileName = $Piece($Piece(url,"?",1),"/",*)
+		
+		Set tCSPSubPath = $Piece(url,tDefaultApp,2,*)  //still has filename and ? parameters in it
+		Set tCSPSubPath = $Piece(tCSPSubPath, tFileName,1) //now it does't
+		
+		set tFileDirectory = tCSPRootPath_tCSPSubPath
+		Set tFullFileName = tFileDirectory_tFileName
+		
+		//On Windows, tFullFileName will contain \ and / but CreateDirectoryChain() and
+		//LinkToFile() already normalize the paths accordingly to the OS for us so
+		//we don't have to worry about it.	
+		If '##class(%File).CreateDirectoryChain(tFileDirectory)
+		{
+			Set st = $System.Status.Error(5001,"Could nor create path chain '"_tFileDirectory_"'")
+			Quit
+		}
+		
+		Set filestream = ##class(%Stream.FileCharacter).%New()
+		set st = filestream.LinkToFile(tFullFileName)
+		Quit:$System.Status.IsError(st)
+		
+		If $IsObject(contentStream) && ..IsWebFile(ext)
+		{
+			Set st=filestream.CopyFrom(contentStream)
+		}
+		Else
+		{
+			Set st=filestream.CopyFrom(binaryStream)
+		}
+		Quit:$System.Status.IsError(st)
+		
+		set st = filestream.%Save()
+		Quit:$System.Status.IsError(st)
+		
+		Write !, "Imported " _ tFullFileName, !
 	}
-	if $$$ISERR(st) Quit st
-	
-	set st = filestream.%Save()
-	
-	if st {
-		w !, "Imported " _ fileDirectory, !
+	Catch (oException)
+	{
+		Set st = oException.AsStatus()
 	}
 	
-	Return st
+	Quit st
 ]]></Implementation>
 </Method>
 </Class>
