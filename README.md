@@ -23,6 +23,12 @@ To create task for syncing  GitHub repository → Cache instance do the followin
 
 After task runs at least once you will get <i>GitHubURL</i> repository contents in <i>Namespace</i>
 
+
+Note that in order to sync CLS, MAC, INT, INC and DFI files they need to be stored<br>
+at corresponding folders. For example: <br>
+<b>for CLS</b>: cls/packagename/file.cls<br>
+<b>for MAC</b>: mac/file.mac
+
 Continuous Integration
 -----------
 

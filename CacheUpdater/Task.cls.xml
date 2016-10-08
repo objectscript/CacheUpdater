@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="Cache" version="25">
+<Export generator="Cache" version="25" zv="Cache for Windows (x86-64) 2016.2 (Build 721U)" ts="2016-09-12 18:18:41">
 <Class name="CacheUpdater.Task">
-<Super>%SYS.Task.Definition</Super>
+<Super>%SYS.Task.Definition,CacheUpdater.UDL</Super>
+<TimeChanged>64173,65712.36031</TimeChanged>
 <TimeCreated>63603,52252.541311</TimeCreated>
 
 <Parameter name="TaskName">
@@ -19,8 +20,8 @@ Increased to 500 to support long urls</Description>
 <Property name="Username">
 <Description><![CDATA[
 GitHub user, who has access to repository. Optional for public repositories.<br>
-Note, that with Username/Password, you can make up to 5,000 requests per hour. 
-For unauthenticated requests, the rate limit allows to make up to 60 requests per hour. 
+Note, that with Username/Password, you can make up to 5,000 requests per hour.
+For unauthenticated requests, the rate limit allows to make up to 60 requests per hour.
 Unauthenticated requests are associated with an IP address.<br>
 Required, if you want to create webhooks]]></Description>
 <Type>%String</Type>
@@ -50,10 +51,10 @@ Repository branch, usually master. Leave empty, if you want to receive default b
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	Return:'##class(%SYS.Namespace).Exists(..Namespace) $$$ERROR($$$NamespaceUnavailable,..Namespace)
-	
+
 	Set Owner = $p(..GitHubURL,"/",4)
 	Set Repository = $p(..GitHubURL,"/",5)
-	
+
 	Return ..Update(Owner, Repository, ..Branch, ..Username, ..Password, ..Namespace)
 ]]></Implementation>
 </Method>
@@ -66,31 +67,32 @@ Downloads and compiles GitHub repository.<br>
 <b>Branch</b> - The name of the commit/branch/tag. If skipped the repository’s default branch (usually master) would be used.<br>
 <b>Username</b> - GitHub user, who has access to repository. Optional for public repositories.<br>
 <b>Password</b> - GitHub password, corresponding to Username. Optional for public repositories.<br>
-Note, that with Username, you can make up to 5,000 requests per hour. 
-For unauthenticated requests, the rate limit allows to make up to 60 requests per hour. 
+Note, that with Username, you can make up to 5,000 requests per hour.
+For unauthenticated requests, the rate limit allows to make up to 60 requests per hour.
 Unauthenticated requests are associated with an IP address.<br>
 <b>Namespace</b> - Namespace, where to download and compile repository.<br>
 
 For example in the repository: https://github.com/intersystems-ru/Cache-MDX2JSON<br>
 Owner - intersystems-ru, Repository - Cache-MDX2JSON.<br> ]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec>Owner:%String,Repository:%String,Branch:%String="",Username:%String,Password:%String,Namespace=$Namespace</FormalSpec>
+<FormalSpec>Owner:%String,Repository:%String,Branch:%String="",Username:%String="",Password:%String="",Namespace=$Namespace</FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
+	#dim req As %Net.HttpRequest
 	Set req = ..CreateRequest(Username, Password)
-	Set req.Location = "repos/" _ Owner _ "/" _ Repository _ "/contents" 	// as described in https://developer.github.com/v3/repos/	
-	Do:(Branch'="") req.SetParam("ref",Branch) 								// if omitted the repository’s default branch (usually master) would be used
-	
+	Set req.Location = "repos/" _ Owner _ "/" _ Repository _ "/contents" 	// as described in https://developer.github.com/v3/repos/
+
  	Set links = ##class(%ListOfDataTypes).%New()
- 	Set st = ..ProcessDirectory("",req,.links)
+ 	Set st = ..ProcessDirectory("",.req,Branch,.links)
  	Return:$$$ISERR(st) st
- 	 	
+
  	Set namespace = $Namespace
  	Zn Namespace
 	Set st = ..DownloadFiles(links,req,.list)
+	zw list
 	Set st2 = $system.OBJ.CompileList(.list,"cuk /checkuptodate=expandedonly")
 	Zn namespace
-	
+
  	Return $$$ADDSC(st, st2)
 ]]></Implementation>
 </Method>
@@ -102,33 +104,36 @@ Process one directory of GitHub repository. Recursive.<br>
 <b>Request</b> - Authenticated/Set %Net.HttpRequest object.<br>
 <b>Links</b> - List of links to raw files (which satisfy <b>IsCacheFile</b> conditions) from repository.<br>]]></Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec><![CDATA[Path:%String="",Request:%Net.HttpRequest,&Links:%ListOfDataTypes]]></FormalSpec>
+<FormalSpec><![CDATA[Path:%String="",Request:%Net.HttpRequest,Branch:%String="",&Links:%ListOfDataTypes]]></FormalSpec>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	Set location = Request.Location
 	Set Request.Location = Request.Location _ Path
-	
+	Do:(Branch'="") Request.SetParam("ref",Branch)
+
 	Set st = Request.Get()
+
 	Return:$$$ISERR(st) st
 	Return:(Request.HttpResponse.StatusCode = 404) $$$ERROR($$$GeneralError,"Repository doesn't exist OR you don't have access")
 	Return:((Request.HttpResponse.StatusCode = 403) && (Request.HttpResponse.GetHeader("X-RATELIMIT-REMAINING")=0)) $$$ERROR($$$GeneralError,"API rate limit exceeded. Try logging in.")
  	Return:(Request.HttpResponse.StatusCode '= 200) $$$ERROR($$$GeneralError,"Received " _ Request.HttpResponse.StatusCode _ " expected 200")
- 	
+
  	#dim objects As List of %ZEN.proxyObject
  	#dim obj As %ZEN.proxyObject
 	Set st = ##class(%ZEN.Auxiliary.jsonProvider).%ConvertJSONToObject(Request.HttpResponse.Data,,.objects,1)
 	Return:$$$ISERR(st) st
-	
-	For i = 1:1:objects.Count() {		
+
+	For i = 1:1:objects.Count() {
 		Set obj = objects.GetAt(i)
 		If (obj.type = "dir") {
-			Set st = ..ProcessDirectory("/"_obj.name,Request,.Links)
-			Return:$$$ISERR(st) st		
+			Set st = ..ProcessDirectory("/"_obj.name,Request,Branch,.Links)
+			Return:$$$ISERR(st) st
 		} ElseIf (obj.type = "file") {
-			Do:..IsCacheFile(obj) Links.Insert(obj."download_url")
+			//Do:..IsCacheFile(obj) Links.Insert(obj."download_url")
+			Do Links.Insert($LB(obj."download_url",..IsCacheFile(obj)))
 		} Else {
 			// obj.type = "symlink" or obj.type = "submodule"
-		} 
+		}
 	}
 	Set Request.Location = location // to keep track of where in the repository tree we are
 	Return $$$OK
@@ -142,7 +147,7 @@ Check that incoming file is the one you need.</Description>
 <FormalSpec>File:%ZEN.proxyObject</FormalSpec>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
-	Set extensions = ",xml,cls,csp,csr,mac,int,bas,inc,gbl,prj,obj,pkg,gof,dfi,pivot,dashboard,"
+	Set extensions = ",xml,cls,csp,csr,mac,int,bas,inc,gbl,prj,obj,pkg,gof,dfi,pivot,dashboard,html,css,js,ts,scss,"
 	Return:($L(File.name,".")=1) 0 //no extension
 	Set File.Extension = $P(File.name,".",$L(File.name,"."))
 	Return $F(extensions,","_$ZCVT(File.Extension,"l")_",")
@@ -162,28 +167,100 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 	Kill Items
 	Set Request.Server = "raw.githubusercontent.com"
 	Set st = $$$OK
-	
-	For i = 1:1:Links.Count() {
-		Set streq = Request.Get($e(Links.GetAt(i),35,*)) // Remove "https://raw.githubusercontent.com/" from URL.	
-		Set:$$$ISERR(streq) st=$$$ADDSC(st, streq)
-		
-		Set binarystream = Request.HttpResponse.Data
-		Do binarystream.Rewind() // just in case
-		
-		Set stream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
-		While 'binarystream.AtEnd { 
-			Do stream.Write(binarystream.Read()) 
+	Try
+	{
+		For i = 1:1:Links.Count()
+		{
+			Set link = $ListGet(Links.GetAt(i),1)
+			Set bIsCacheFile = $ListGet(Links.GetAt(i),2)
+			Set ^gitfiles(i,"link")=link
+			Set ^gitfiles(i,"bIsCacheFile")=bIsCacheFile
+
+			Set streq = Request.Get($e(link,35,*)) // Remove "https://raw.githubusercontent.com/" from URL.
+			If $$$ISERR(streq)
+			{
+				Set st=$$$ADDSC(st, streq)
+				Set ^gitfiles(i,"streq")=streq
+				Continue
+			}
+
+			Set ^gitfiles(i,"stream")="starting..."
+			Set binarystream = Request.HttpResponse.Data
+
+			Do binarystream.Rewind() // just in case
+
+			Set characterStream=##class(%GlobalCharacterStream).%New() //translating binary stream into character stream
+			Set stTranslate=$$$OK
+			Try
+			{
+				While 'binarystream.AtEnd
+				{
+					//Use eol to prevent breaking lines larger than 32Kb
+					Set line=binarystream.ReadLine(, .stTranslate, .eol)
+					Quit:$System.Status.IsError(stTranslate)
+
+					If eol
+					{
+						Set stTranslate=characterStream.WriteLine(line)
+					}
+					Else
+					{
+						Set stTranslate=characterStream.Write(line)
+					}
+					Quit:$System.Status.IsError(stTranslate)
+				}
+				Quit:$System.Status.IsError(stTranslate)
+
+				Do characterStream.Rewind()
+			}
+			Catch (oTranslateStreamException)
+			{
+				Set stTranslate=oTranslateStreamException.AsStatus()
+			}
+
+			If $System.Status.IsError(stTranslate)
+			{
+				//Could not convert binary stream to character stream
+				//It is probably a binary file anyway
+				Set characterStream=""
+				Set st=$$$ADDSC(st, stTranslate)
+				Set ^gitfiles(i,"stTranslate")=stTranslate
+			}
+			Set ^gitfiles(i,"stream")="Done"
+
+			Do binarystream.Rewind()
+
+			Set stload = $$$OK
+
+			set items = ""
+			If ('$IsObject(characterStream)) || (..IsUDLFile(characterStream))
+			{
+				Set ^gitfiles(i,"IsUDLFile")="1"
+				Set stload = ..LoadUDLFile(characterStream, binarystream, link, .items)
+			}
+			ElseIf bIsCacheFile
+			{
+				Set ^gitfiles(i,"IsUDLFile")="0"
+				Set stload = $system.OBJ.LoadStream(characterStream,"",.error,.items,,,,"UTF8")
+			}
+			Set ^gitfiles(i,"stload")=stload
+	 		If $$$ISERR(stload)
+	 		{
+		 		Set st=$$$ADDSC(st, stload)
+		 		Continue
+	 		}
+	 		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
 		}
-		Do stream.Rewind()
-		
-		Set stload = $system.OBJ.LoadStream(stream,"",.error,.items,,,,"UTF8")
-		
- 		Set:$$$ISERR(stload) st=$$$ADDSC(st, stload)
- 		Merge Items = items  // Does not overwrite existing array keys: Items(itemname)=""
+
+		Set Request.Server="api.github.com"
 	}
-	
-	Set Request.Server="api.github.com"
-	Return st
+	Catch (oException)
+	{
+		Set st = oException.AsStatus()
+		If $D(i) Set ^gitfiles(i,"st final")=st
+	}
+
+	Quit st
 ]]></Implementation>
 </Method>
 
@@ -194,7 +271,7 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
 <Implementation><![CDATA[
 	Set namespace = $Namespace
  	Set SSLConfig = "GitHub"
- 	
+
  	Zn "%SYS"
  	Do:'##class(Security.SSLConfigs).Exists(SSLConfig) ##class(Security.SSLConfigs).Create(SSLConfig)
  	Zn namespace
@@ -202,15 +279,418 @@ Download list of files on https://raw.githubusercontent.com/ server.<br>
  	Set req=##class(%Net.HttpRequest).%New()
  	Set req.Https=1
 	Set req.SSLConfiguration=SSLConfig
-	Set req.Server="api.github.com"							
-	Do req.SetHeader("Accept","application/vnd.github.v3+json") 			// we want 3rd version of api	
-	
+	Set req.Server="api.github.com"
+	Do req.SetHeader("Accept","application/vnd.github.v3+json") 			// we want 3rd version of api
+
 	If ($d(Username) && $d(Password) && (Username'="") && (Password'="")) {	// supply Username and Password, if both are provided. GitHub accept Basic Auth
 		Set req.Username = Username											// https://developer.github.com/v3/auth/
 	 	Set req.Password = Password
-	} 	
+	}
 
 	Return req
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="CacheUpdater.UDL">
+<Super>%RegisteredObject</Super>
+<TimeChanged>64173,65465.415142</TimeChanged>
+<TimeCreated>64161,48850.325593</TimeCreated>
+
+<Method name="IsUDLFile">
+<Description><![CDATA[
+Checks whether this file is in UDL format
+<b>stream</b> - stream which contains file definition]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>stream:%GlobalCharacterStream</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	// probably 10 lines is enough
+	set counter = 0
+	while 'stream.AtEnd {
+		if counter >= 10 {
+			quit
+		}
+		set line = stream.ReadLine()
+		if $find(line, "<Export") {
+			do stream.Rewind()
+			return $$$NO
+		}
+		set counter = counter + 1
+	}
+	do stream.Rewind()
+
+	return $$$YES
+]]></Implementation>
+</Method>
+
+<Method name="ReadName">
+<Description><![CDATA[
+Finds the first string in a line
+<b>line</b> - any string.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>line:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	set trimmed = $zstrip(line, "<>W")
+	return $piece(trimmed, " ")
+]]></Implementation>
+</Method>
+
+<Method name="GetClassName">
+<Description><![CDATA[
+Finds a name of a class
+<b>stream</b> - stream which contains a class definition<br>
+<b>name</b> - name which contains the name of class<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[stream:%GlobalCharacterStream,&name:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	while 'stream.AtEnd {
+		set line = stream.ReadLine()
+
+		if $extract(line, 1, 3) = "///" { // check for inline comments
+			continue
+		} elseif $zconvert($extract(line, 1, 5), "l") = "class" {
+			set line = $extract(line, 6, *)
+			set name = ..ReadName(line)
+			if name = "" {
+				return '$$$OK
+			} else {
+				return $$$OK
+			}
+		}
+	}
+	return '$$$OK
+]]></Implementation>
+</Method>
+
+<Method name="GetRoutineName">
+<Description><![CDATA[
+Finds a name of a routine
+<b>stream</b> - stream which contains a routine definition<br>
+<b>name</b> - name which contains the name of routine<br>
+<b>type</b> - type of file {1 - mac, 2 - inc, 3 - int}]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[stream:%GlobalCharacterStream,&name:%String,&type:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	while 'stream.AtEnd {
+		set line = stream.ReadLine()
+		set index = $find(line, "ROUTINE")
+		// TODO - check whether the name on the next line
+		// or something is between ROUTINE and name
+		if index {
+			if $find(line, "[Type=INC]") {
+				set type = 2
+			}
+			elseif $find(line, "[Type=INT,Generated]") {
+				set type = 3
+			}
+			else {
+				set type = 1
+			}
+			set line = $extract(line, index, *)
+			set name = ..ReadName(line)
+			if name = "" {
+				return '$$$OK
+			} else {
+				return $$$OK
+			}
+		}
+	}
+	return '$$$OK
+]]></Implementation>
+</Method>
+
+<Method name="GetDFIName">
+<Description><![CDATA[
+Finds a name of a dfi
+<b>stream</b> - stream which contains a dfi definition<br>
+<b>name</b> - name which contains the name of dfi<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[stream:%GlobalCharacterStream,&name:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim textreader As %XML.TextReader
+	set dfiContent = ""
+
+	// I don't know why but if i just parse stream it doesn't work
+	while 'stream.AtEnd {
+		set dfiContent = dfiContent _ stream.Read()
+	}
+
+	set st = ##class(%XML.TextReader).ParseString(dfiContent, .textreader)
+	return:$$$ISERR(st) st
+
+	while textreader.Read() {
+		set node = textreader.Name
+		if (node = "pivot") || (node = "dashboard") {
+			do textreader.MoveToAttributeName("folderName")
+			set dfiFolderName = $translate(textreader.Value, " ", "-")
+
+			do textreader.MoveToAttributeName("name")
+			set dfiName = $translate(textreader.Value, " ", "-")
+
+			set name = dfiFolderName _ "-" _ dfiName _ "." _ node _ ".dfi"
+			return $$$OK
+		}
+	}
+	return '$$$OK
+]]></Implementation>
+</Method>
+
+<Method name="GetExt">
+<Description><![CDATA[
+Get extension of the file by url
+<b>url</b> - the url where the file is located in the web.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>url:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	//return $zconvert($piece(url, ".", *), "l")
+	//AMIR: There are parameters after the extension that are not part of the extension
+	return $zconvert($piece($piece(url, ".", *),"?"), "l")
+]]></Implementation>
+</Method>
+
+<Method name="IsWebFile">
+<Description><![CDATA[
+Check whether a file is a web file
+<b>ext</b> - extensions of the file<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>ext:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	set webExts = "csp,html,css,js,ts,scss"
+	return $find(webExts, ext)
+]]></Implementation>
+</Method>
+
+<Method name="LoadUDLFile">
+<Description><![CDATA[
+Imports the file in UDL file in the project
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>
+<b>list</b> - array of files to compile<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>contentStream:%GlobalCharacterStream,binaryStream:%Stream.FileCharacterGzip,url:%String,list:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	set st = $$$OK
+
+	set ext = ..GetExt(url)
+
+	if ext = "cls" {
+		set st = ..CreateClass(contentStream, url, .list)
+	}
+	elseif ext = "dfi" {
+		set st = ..CreateDFI(contentStream, url, .list)
+	}
+	elseif (ext = "inc") || (ext = "mac") {
+		set st = ..CreateRoutine(contentStream, url, .list)
+	}
+	else
+	{
+		set st = ..CreateWebFile(contentStream, binaryStream, url, ext, .list)
+	}
+	return st
+]]></Implementation>
+</Method>
+
+<Method name="DoesClassExist">
+<Description><![CDATA[
+Checks whether the class exists
+<b>className</b> - name of the class.<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>className:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	Set query = "SELECT TOP 1 COUNT(ID) FROM %Dictionary.ClassDefinition WHERE ID = ?"
+	Set statement = ##class(%SQL.Statement).%New()
+	Set st = statement.%Prepare(query)
+	Set rset = statement.%Execute(className)
+	If (rset.%Next()) && (rset.%ROWCOUNT > 0) {
+		Return $$$YES
+	}
+	Return $$$NO
+]]></Implementation>
+</Method>
+
+<Method name="CreateClass">
+<Description><![CDATA[
+Creates and imports the class into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>
+<b>list</b> - array of files to compile<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[contentStream:%CharacterStream,url:%String,&list:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = ..GetClassName(contentStream, .className)
+	Return:$$$ISERR(st) st
+
+	set list(className _ ".cls") = ""
+
+	Do contentStream.Rewind()
+
+	if '(##class(%Dictionary.ClassDefinition).%ExistsId(className))  {
+		Set clsDef = ##class(%Dictionary.ClassDefinition).%New()
+		Set clsDef.Name = className
+		Set st = clsDef.%Save()
+		Return:$$$ISERR(st) st
+	}
+
+
+	Set namespace = $namespace
+	Set st = ##class(%Compiler.UDL.TextServices).SetTextFromStream(namespace, className, contentStream)
+
+	if st {
+		w !, "Imported " _ className, !
+	}
+
+	Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateDFI">
+<Description><![CDATA[
+Creates and imports the dfi file into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>list</b> - array of files to compile<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[contentStream:%CharacterStream,url:%String,&list:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = $$$OK
+    Try {
+	    Set st = ..GetDFIName(contentStream, .name)
+	    Return:$$$ISERR(st) st
+
+	    set list(name) = ""
+
+        Set tDoc = ##class(%DeepSee.UI.FolderItemDocument).%New(name)
+        Set st = tDoc.ImportFromXML(contentStream)
+        Return:$$$ISERR(st) st
+
+        Set st = tDoc.Save()
+        if st {
+		w !, "Imported " _ name, !
+	}
+        Return:$$$ISERR(st) st
+    } Catch e {
+        Set st = e.AsStatus()
+    }
+    Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateRoutine">
+<Description><![CDATA[
+Creates and imports mac, int, inc files into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>
+<b>list</b> - array of files to compile<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[contentStream:%GlobalCharacterStream,url:%String,&list:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = ..GetRoutineName(contentStream, .name, .type)
+	do contentStream.Rewind()
+
+	return:$$$ISERR(st) st
+
+	if type = 1 {
+		set name = name _ ".mac"
+	}
+	elseif type = 2 {
+		set name = name _ ".inc"
+	}
+	elseif type = 3 {
+		set name = name _ ".int"
+	}
+
+	set list(name) = ""
+
+	Set rtn = ##class(%Routine).%New(name)
+	While 'contentStream.AtEnd {
+		Set line = contentStream.ReadLine()
+		If $Find(line, "ROUTINE") {
+			Continue
+		}
+		Do rtn.WriteLine(line)
+	}
+
+	Set st = rtn.Save()
+ 	Return:$$$ISERR(st) st
+
+ 	if st {
+		w !, "Imported " _ name, !
+	}
+ 	Return st
+]]></Implementation>
+</Method>
+
+<Method name="CreateWebFile">
+<Description><![CDATA[
+Creates and imports mac, int, inc files into the project from stream
+<b>contentStream</b> - the stream which contains the source code in udl format.<br>
+<b>url</b> - the url where the file is located in the web.<br>
+<b>ext</b> - extension of the file<br>
+<b>list</b> - array of files to compile<br>]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[contentStream:%GlobalCharacterStream,binaryStream:%Stream.FileCharacterGzip,url:%String,ext:%String,&list:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set st = $$$OK
+	Try
+	{
+		Set tDefaultApp=$system.CSP.GetDefaultApp($namespace)_"/"
+		set tCSPRootPath = $system.CSP.GetFileName(tDefaultApp)
+
+		Set tFileName = $Piece($Piece(url,"?",1),"/",*)
+
+		Set tCSPSubPath = $Piece(url,tDefaultApp,2,*)  //still has filename and ? parameters in it
+		Set tCSPSubPath = $Piece(tCSPSubPath, tFileName,1) //now it does't
+
+		set tFileDirectory = tCSPRootPath_tCSPSubPath
+		Set tFullFileName = tFileDirectory_tFileName
+
+		//On Windows, tFullFileName will contain \ and / but CreateDirectoryChain() and
+		//LinkToFile() already normalize the paths accordingly to the OS for us so
+		//we don't have to worry about it.
+		If '##class(%File).CreateDirectoryChain(tFileDirectory)
+		{
+			Set st = $System.Status.Error(5001,"Could nor create path chain '"_tFileDirectory_"'")
+			Quit
+		}
+
+		Set filestream = ##class(%Stream.FileCharacter).%New()
+		set st = filestream.LinkToFile(tFullFileName)
+		Quit:$System.Status.IsError(st)
+
+		If $IsObject(contentStream) && ..IsWebFile(ext)
+		{
+			Set st=filestream.CopyFrom(contentStream)
+		}
+		Else
+		{
+			Set st=filestream.CopyFrom(binaryStream)
+		}
+		Quit:$System.Status.IsError(st)
+
+		set st = filestream.%Save()
+		Quit:$System.Status.IsError(st)
+
+		Write !, "Imported " _ tFullFileName, !
+	}
+	Catch (oException)
+	{
+		Set st = oException.AsStatus()
+	}
+
+	Quit st
 ]]></Implementation>
 </Method>
 </Class>
