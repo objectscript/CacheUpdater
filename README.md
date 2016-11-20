@@ -15,7 +15,7 @@ Call
 
 to download and compile classes from the Github repo.
 
-Where
+Where <br>
 <b>Owner</b> - The name of the repository owner.<br>
 <b>Repository</b> - The name of the repository.<br>
 <b>Branch</b> - The name of the commit/branch/tag. If skipped the repository’s default branch (usually master) would be used.<br>
