@@ -286,13 +286,10 @@ ClassMethod CreateWebFile(contentStream As %GlobalCharacterStream, binaryStream 
 	Set st = $$$OK
 	Try
 	{
-		Set tDefaultApp=$system.CSP.GetDefaultApp($namespace)_"/"
-		set tCSPRootPath = $system.CSP.GetFileName(tDefaultApp)
-
+		Set tCSPRootPath = $system.CSP.GetFileName($system.CSP.GetDefaultApp($namespace)_"/")
+		
 		Set tFileName = $Piece($Piece(url,"?",1),"/",*)
-
-		Set tCSPSubPath = $Piece(url,tDefaultApp,2,*)  //still has filename and ? parameters in it
-		Set tCSPSubPath = $Piece(tCSPSubPath, tFileName,1) //now it does't
+		Set tCSPSubPath = $Piece(url,"/",7,*-1)_"/"
 
 		set tFileDirectory = tCSPRootPath_tCSPSubPath
 		Set tFullFileName = tFileDirectory_tFileName
