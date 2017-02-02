@@ -1,4 +1,4 @@
-Class CacheUpdater.Task Extends (%SYS.Task.Definition, CacheUpdater.UDL)
+﻿Class CacheUpdater.Task Extends (%SYS.Task.Definition, CacheUpdater.UDL)
 {
 
 Parameter TaskName = "GitHub Update";
@@ -81,8 +81,9 @@ ClassMethod ProcessDirectory(Path As %String = "", Request As %Net.HttpRequest, 
 	Return:$$$ISERR(st) st
 	Return:(Request.HttpResponse.StatusCode = 404) $$$ERROR($$$GeneralError,"Repository doesn't exist OR you don't have access")
 	Return:((Request.HttpResponse.StatusCode = 403) && (Request.HttpResponse.GetHeader("X-RATELIMIT-REMAINING")=0)) $$$ERROR($$$GeneralError,"API rate limit exceeded. Try logging in.")
- 	Return:(Request.HttpResponse.StatusCode '= 200) $$$ERROR($$$GeneralError,"Received " _ Request.HttpResponse.StatusCode _ " expected 200")
-
+ 	Return:(Request.HttpResponse.StatusCode = 401) $$$ERROR($$$GeneralError,"We couldn't find that combination of username and password")
+	Return:(Request.HttpResponse.StatusCode '= 200) $$$ERROR($$$GeneralError,"Received " _ Request.HttpResponse.StatusCode _ " expected 200")
+	
  	#dim objects As List of %ZEN.proxyObject
  	#dim obj As %ZEN.proxyObject
 	Set st = ##class(%ZEN.Auxiliary.jsonProvider).%ConvertJSONToObject(Request.HttpResponse.Data,,.objects,1)
