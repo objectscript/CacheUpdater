@@ -1,6 +1,8 @@
 Class CacheUpdater.UDL Extends %RegisteredObject
 {
 
+Parameter NamespacePar As %String = {$Namespace};
+
 /// Checks whether this file is in UDL format
 /// <b>stream</b> - stream which contains file definition
 ClassMethod IsUDLFile(stream As %GlobalCharacterStream) As %Boolean
@@ -199,7 +201,9 @@ ClassMethod CreateClass(contentStream As %CharacterStream, url As %String, ByRef
 
 
 	Set namespace = $namespace
-	Set st = ##class(%Compiler.UDL.TextServices).SetTextFromStream(namespace, className, contentStream)
+	Set $namespace = ..#NamespacePar
+	Set st = ##class(CacheUpdater.TextServices).SetTextFromStream(namespace,className, contentStream)
+	Set $namespace = namespace
 
 	if st {
 		w !, "Imported " _ className, !
